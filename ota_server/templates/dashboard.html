@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OTA Fleet Operations -- Hyundai (demo)</title>
+<style>
+  :root {
+    --bg: #0d0f10; --panel: #16191b; --line: #262b2e; --ink: #e8e8e4; --muted: #8b9096;
+    --good: #0ca30c; --critical: #d03b3b; --accent: #2a78d6; --warn: #eda100;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'SF Mono','Consolas',monospace; padding: 28px 36px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+  .tile .label { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+  .tile .value { font-size: 26px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile.good .value { color: var(--good); }
+  .tile.critical .value { color: var(--critical); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); text-transform: uppercase; font-size: 10px; }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .badge { padding: 2px 6px; border-radius: 3px; font-size: 10px; text-transform: uppercase; }
+  .badge.installed { background: rgba(12,163,12,0.15); color: var(--good); }
+  .badge.rolled_back { background: rgba(237,161,0,0.15); color: var(--warn); }
+  .badge.rejected { background: rgba(208,59,59,0.15); color: var(--critical); }
+  .bars { display: flex; flex-direction: column; gap: 8px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+  .bar-row .name { width: 150px; flex-shrink: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { flex: 1; background: #1f2426; border-radius: 3px; overflow: hidden; height: 14px; }
+  .bar-fill { background: var(--accent); height: 100%; }
+  .bar-row .count { width: 30px; text-align: right; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .empty { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>OTA FLEET OPERATIONS -- Hyundai (demo)</h1>
+  <div class="subtitle">Software Update Management System (UNECE R156) -- updates every 2s</div>
+  <div class="tiles" id="tiles"></div>
+  <div class="cols">
+    <div class="panel">
+      <h2>Fleet firmware version distribution</h2>
+      <div class="bars" id="version-dist"></div>
+    </div>
+    <div class="panel">
+      <h2>Rejected updates by reason</h2>
+      <div class="bars" id="rejected-dist"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Recent events</h2>
+    <table>
+      <thead><tr><th>VIN</th><th>Event</th><th>Version</th><th>Reason</th><th>When</th></tr></thead>
+      <tbody id="events"></tbody>
+    </table>
+  </div>
+<script>
+function timeAgo(ts, now) {
+  const s = Math.max(0, Math.round(now - ts));
+  return s < 60 ? s + "s ago" : Math.round(s/60) + "m ago";
+}
+function tile(label, value, cls) {
+  return `<div class="tile ${cls||''}"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+}
+function bars(dist) {
+  const entries = Object.entries(dist);
+  if (!entries.length) return '<div class="empty">No data yet.</div>';
+  const max = Math.max(...entries.map(e => e[1]));
+  return entries.map(([k, v]) => `
+    <div class="bar-row">
+      <div class="name">${k}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v/max)*100}%"></div></div>
+      <div class="count">${v}</div>
+    </div>`).join('');
+}
+async function refresh() {
+  const res = await fetch('/admin/stats.json');
+  const data = await res.json();
+  const t = data.totals;
+  document.getElementById('tiles').innerHTML = [
+    tile('Vehicles', t.total_vehicles),
+    tile('Installs', t.installs, 'good'),
+    tile('Rollbacks', t.rollbacks, t.rollbacks > 0 ? 'critical' : ''),
+    tile('Rejected (attacks)', t.rejected, t.rejected > 0 ? 'critical' : 'good'),
+    tile('Firmware Versions', t.firmware_versions),
+  ].join('');
+  document.getElementById('version-dist').innerHTML = bars(data.version_distribution);
+  document.getElementById('rejected-dist').innerHTML = bars(data.rejected_by_reason);
+  const now = Date.now() / 1000;
+  document.getElementById('events').innerHTML = data.recent_events.length ? data.recent_events.map(e => `
+    <tr><td>${e.vin}</td><td><span class="badge ${e.event}">${e.event.replace('_',' ')}</span></td>
+        <td>${e.version}</td><td>${e.reason || '--'}</td><td>${timeAgo(e.ts, now)}</td></tr>
+  `).join('') : '<tr><td colspan="5" class="empty">No events yet.</td></tr>';
+}
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
